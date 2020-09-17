@@ -1,0 +1,55 @@
+FROM centos:7
+
+#requirement packages install
+RUN yum install -y automake libtool flex bison pkgconfig gcc-c++ boost-devel libevent-devel zlib-devel python-devel ruby-devel openssl-devel wget make tar git
+
+# thrift(with fb303) + scribe + hiredis clone
+WORKDIR /tmp
+RUN git clone https://github.com/mozily/scribe_to_redis.git
+
+#thrift install
+WORKDIR /tmp/scribe_to_redis/thrift
+RUN tar -xzvf thrift-0.9.0.tar.gz
+WORKDIR /tmp/scribe_to_redis/thrift/thrift-0.9.0
+RUN ./configure \
+    && make \
+    && make install \
+    && find /usr/local -name *thrift*
+
+# fb303 install
+WORKDIR /tmp/scribe_to_redis/thrift/thrift-0.9.0/contrib/fb303
+RUN ./bootstrap.sh \
+    && ./configure CPPFLAGS="-DHAVE_INTTYPES_H -DHAVE_NETINET_IN_H" \
+    && make \
+    && make install \
+    && find /usr/local -name *fb303*
+
+#hiredis install
+WORKDIR /tmp/scribe_to_redis/hiredis
+RUN make \
+    && make install \
+    && ldconfig
+
+#scribe install
+WORKDIR /tmp/scribe_to_redis/scribe
+RUN chmod 555 bootstrap.sh \
+    && ./bootstrap.sh --with-boost-filesystem=boost_filesystem \
+    && ./configure --with-boost-system=boost_system-mt --with-boost-filesystem=boost_filesystem-mt CPPFLAGS="-DHAVE_INTTYPES_H -DHAVE_NETINET_IN_H" \
+    && make \
+    && make install
+
+# scribe setup
+WORKDIR /tmp/scribe_to_redis/scribe/examples
+RUN echo "/usr/local/lib" > /etc/ld.so.conf.d/scribed.conf \
+    && ldconfig \
+    && chmod 755 scribe_cat \
+    && cp -f scribe_cat /usr/local/bin \
+    && chmod 755 scribe_ctrl \
+    && cp -f scribe_ctrl /usr/local/bin \
+    && mkdir -p /etc/scribed
+
+RUN echo "SCRIBED_CONFIG=/etc/scribed/scribed.conf" >> /etc/sysconfig/scribed \
+    && cat scribed > /etc/init.d/scribed \
+    && chmod ugo+x /etc/init.d/scribed
+
+EXPOSE 1463
